@@ -3,6 +3,10 @@
 
 @interface AFSynccitAPIClient : AFHTTPClient
 
+@property NSString *username;
+@property NSString *authCode;
+
+
 + (AFSynccitAPIClient *)sharedClient;
 
 -(void) addLinkId:(NSString*)linkId;

@@ -7,8 +7,6 @@ NSString * const kAFRSynccitAPIBaseURLString = @"http://api.synccit.com/api.php"
 @interface AFSynccitAPIClient ()
 @property NSMutableArray *linkIds;
 @property NSTimer *updateTimer;
-@property NSString *username;
-@property NSString *authCode;
 @property AFHTTPRequestOperation* updateOperation;
 @end
 
@@ -18,7 +16,7 @@ NSString * const kAFRSynccitAPIBaseURLString = @"http://api.synccit.com/api.php"
     static AFSynccitAPIClient *_sharedClient = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        _sharedClient = [[AFSynccitAPIClient alloc] initWithBaseURL:[NSURL URLWithString:kAFRSynccitAPIBaseURLString]];
+        _sharedClient = [[[self class] alloc] initWithBaseURL:[NSURL URLWithString:kAFRSynccitAPIBaseURLString]];
     });
     
     return _sharedClient;
@@ -30,10 +28,27 @@ NSString * const kAFRSynccitAPIBaseURLString = @"http://api.synccit.com/api.php"
         return nil;
     }
     
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(applicationDidBecomeActiveNotification)
+                                                 name:UIApplicationDidBecomeActiveNotification
+                                               object:nil];
+    
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(applicationWillResignActiveNotification)
+                                                 name:UIApplicationWillResignActiveNotification
+                                               object:nil];
+    
+    
     self.linkIds = [NSMutableArray array];
     [self registerHTTPOperationClass:[AFHTTPRequestOperation class]];
     [self setDefaultHeader:@"Accept" value:@"application/json"];
+    
     return self;
+}
+
+-(void) dealloc
+{
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
 -(void) updateTimerFireMethod:(NSTimer*)timer
@@ -41,7 +56,7 @@ NSString * const kAFRSynccitAPIBaseURLString = @"http://api.synccit.com/api.php"
     if (self.linkIds.count == 0 || self.updateOperation != nil) {
         return;
     }
-
+    
     NSArray *linkIdsSynccing = [self.linkIds copy];
     [self.linkIds removeAllObjects];
     
@@ -77,7 +92,7 @@ NSString * const kAFRSynccitAPIBaseURLString = @"http://api.synccit.com/api.php"
             return;
         }
     };
-
+    
     void (^failure)(AFHTTPRequestOperation *_operation, NSError *error) = ^(AFHTTPRequestOperation *_operation, NSError *error)
     {
         //retry on HTTP failure
@@ -86,8 +101,8 @@ NSString * const kAFRSynccitAPIBaseURLString = @"http://api.synccit.com/api.php"
         finally();
         DLog(@"synccit API update failed %@", error);
     };
-
-
+    
+    
 	NSURLRequest *request = [self requestWithMethod:@"POST" path:@"" parameters:parameters];
 	self.updateOperation = [self HTTPRequestOperationWithRequest:request success:success failure:failure];
     [self enqueueHTTPRequestOperation:self.updateOperation];
@@ -126,16 +141,10 @@ NSString * const kAFRSynccitAPIBaseURLString = @"http://api.synccit.com/api.php"
     self.username = username;
     self.authCode = authCode;
     
-    [self.updateTimer invalidate];
-    self.updateTimer = nil;
+    [self unscheduleUpdateTimer];
     
     if (self.username && self.authCode) {
-        self.updateTimer = [NSTimer timerWithTimeInterval:5.
-                                                   target:self
-                                                 selector:@selector(updateTimerFireMethod:)
-                                                 userInfo:nil
-                                                  repeats:YES];
-        [[NSRunLoop mainRunLoop] addTimer:self.updateTimer forMode:NSRunLoopCommonModes];        
+        [self rescheduleUpdateTimer];
     }
 }
 
@@ -159,19 +168,25 @@ NSString * const kAFRSynccitAPIBaseURLString = @"http://api.synccit.com/api.php"
     ^(AFHTTPRequestOperation *_operation, NSData* _responseObject)
     {
         NSError *error;
-        NSArray *jsonArray = [NSJSONSerialization JSONObjectWithData:_responseObject options:0 error:&error];
+        id json = [NSJSONSerialization JSONObjectWithData:_responseObject options:0 error:&error];
         if (error) {
             DLog(@"synccit API malformed response %@", [[NSString alloc] initWithData:_responseObject encoding:NSUTF8StringEncoding]);
             if(failure) failure(_operation,[self errorWithDescription:@"Malformed response"]);
             return;
         }
         
-        if(![jsonArray isKindOfClass:[NSArray class]]){
+        if([json isKindOfClass:[NSDictionary class]] && json[@"error"] != nil ){
+            NSString *error = [NSString stringWithFormat:@"Synccit returned error: %@",json[@"error"]];
+            if(failure) failure(_operation,[self errorWithDescription:error]);
+            return;
+        }
+        
+        if(![json isKindOfClass:[NSArray class]]){
             if(failure) failure(_operation,[self errorWithDescription:@"Malformed response"]);
             return;
         }
         
-        if(success) success(_operation,[self linkIdsArrayDictionary:jsonArray]);
+        if(success) success(_operation,[self linkIdsArrayDictionary:json]);
     };
     
     void (^failureWrapper)(AFHTTPRequestOperation *_operation, NSError *_error) = ^(AFHTTPRequestOperation *_operation, NSError *_error)
@@ -232,7 +247,7 @@ NSString * const kAFRSynccitAPIBaseURLString = @"http://api.synccit.com/api.php"
     NSDictionary *jsonDictionary = @{
                                      @"username" : self.username,
                                      @"auth"     : self.authCode,
-                                     @"dev"      : @"synccit json",
+                                     @"dev"      : @"amrc",
                                      @"mode"     : mode,
                                      @"links"    : links
                                      };
@@ -246,6 +261,42 @@ NSString * const kAFRSynccitAPIBaseURLString = @"http://api.synccit.com/api.php"
     NSDictionary* userInfo = @{NSLocalizedDescriptionKey:desc};
     NSError* er = [NSError errorWithDomain:@"AFSynccitAPIClient" code:-999 userInfo:userInfo];
     return er;
+}
+
+#pragma mark Update timer
+
+-(void) rescheduleUpdateTimer
+{
+    [self unscheduleUpdateTimer];
+    self.updateTimer = [NSTimer timerWithTimeInterval:10.
+                                               target:self
+                                             selector:@selector(updateTimerFireMethod:)
+                                             userInfo:nil
+                                              repeats:YES];
+    [[NSRunLoop mainRunLoop] addTimer:self.updateTimer forMode:NSRunLoopCommonModes];
+}
+
+-(void) unscheduleUpdateTimer
+{
+    if (self.updateTimer == nil) {
+        return;
+    }
+    
+    [self.updateTimer performSelectorOnMainThread:@selector(invalidate) withObject:nil waitUntilDone:NO];
+    self.updateTimer = nil;
+}
+
+#pragma mark NSNotification
+
+- (void) applicationDidBecomeActiveNotification
+{
+    [self rescheduleUpdateTimer];
+}
+
+- (void) applicationWillResignActiveNotification
+{
+    [self updateTimerFireMethod:self.updateTimer];
+    [self unscheduleUpdateTimer];
 }
 
 @end
