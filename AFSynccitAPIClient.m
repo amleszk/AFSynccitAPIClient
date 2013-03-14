@@ -1,6 +1,7 @@
 
 #import "AFSynccitAPIClient.h"
 #import "AFJSONRequestOperation.h"
+#import "RCUserDefaults.h"
 
 NSString * const kAFRSynccitAPIBaseURLString = @"http://api.synccit.com/api.php";
 
@@ -40,7 +41,7 @@ NSString * const kAFRSynccitAPIBaseURLString = @"http://api.synccit.com/api.php"
     
     
     self.linkIds = [NSMutableArray array];
-    [self registerHTTPOperationClass:[AFHTTPRequestOperation class]];
+    [self registerHTTPOperationClass:[AFJSONRequestOperation class]];
     [self setDefaultHeader:@"Accept" value:@"application/json"];
     
     return self;
@@ -49,6 +50,11 @@ NSString * const kAFRSynccitAPIBaseURLString = @"http://api.synccit.com/api.php"
 -(void) dealloc
 {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+-(BOOL) isEnabled
+{
+    return self.username != nil && self.authCode != nil;
 }
 
 -(void) updateTimerFireMethod:(NSTimer*)timer
@@ -70,18 +76,9 @@ NSString * const kAFRSynccitAPIBaseURLString = @"http://api.synccit.com/api.php"
         self.updateOperation = nil;
     };
     
-    void (^success)(AFHTTPRequestOperation *operation, NSData* responseObject) =
-    ^(AFHTTPRequestOperation *operation, NSData* responseObject)
+    void (^success)(AFHTTPRequestOperation *operation, NSDictionary* jsonDictionary) =
+    ^(AFHTTPRequestOperation *operation, NSDictionary* jsonDictionary)
     {
-        finally();
-        
-        NSError *error;
-        NSDictionary *jsonDictionary = [NSJSONSerialization JSONObjectWithData:responseObject options:0 error:&error];
-        if (error) {
-            DLog(@"synccit API update returned error %@", error);
-            return;
-        }
-        
         if(![jsonDictionary isKindOfClass:[NSDictionary class]]){
             DLog(@"synccit API update returned non json");
             return;
@@ -91,6 +88,8 @@ NSString * const kAFRSynccitAPIBaseURLString = @"http://api.synccit.com/api.php"
             DLog(@"synccit API update returned error %@", jsonDictionary[@"error"]);
             return;
         }
+        DLog(@"synccit API update success.");
+        finally();
     };
     
     void (^failure)(AFHTTPRequestOperation *_operation, NSError *error) = ^(AFHTTPRequestOperation *_operation, NSError *error)
@@ -143,7 +142,7 @@ NSString * const kAFRSynccitAPIBaseURLString = @"http://api.synccit.com/api.php"
     
     [self unscheduleUpdateTimer];
     
-    if (self.username && self.authCode) {
+    if ([self isEnabled]) {
         [self rescheduleUpdateTimer];
     }
 }
@@ -153,9 +152,8 @@ NSString * const kAFRSynccitAPIBaseURLString = @"http://api.synccit.com/api.php"
                  failure:(void (^)(AFHTTPRequestOperation *operation, NSError *error))failure
 {
     if (self.username == nil || self.authCode == nil) {
-        failure(nil, [self errorWithDescription:@"not logged in"]);
+        if(failure) failure(nil, [self errorWithDescription:@"not logged in"]);
     }
-    
     
     NSDictionary *jsonDictionary = [self requestJSONWithLinks:[self linkIdsDictionariesForLinkIds:linkIds] mode:@"read"];
     NSError *error;
@@ -164,17 +162,9 @@ NSString * const kAFRSynccitAPIBaseURLString = @"http://api.synccit.com/api.php"
     NSDictionary* parameters = @{@"type": @"json", @"data" : jsonString};
     
     
-    void (^successWrapper)(AFHTTPRequestOperation *_operation, NSData* _responseObject) =
-    ^(AFHTTPRequestOperation *_operation, NSData* _responseObject)
+    void (^successWrapper)(AFHTTPRequestOperation *_operation, id json) =
+    ^(AFHTTPRequestOperation *_operation, id json)
     {
-        NSError *error;
-        id json = [NSJSONSerialization JSONObjectWithData:_responseObject options:0 error:&error];
-        if (error) {
-            DLog(@"synccit API malformed response %@", [[NSString alloc] initWithData:_responseObject encoding:NSUTF8StringEncoding]);
-            if(failure) failure(_operation,[self errorWithDescription:@"Malformed response"]);
-            return;
-        }
-        
         if([json isKindOfClass:[NSDictionary class]] && json[@"error"] != nil ){
             NSString *error = [NSString stringWithFormat:@"Synccit returned error: %@",json[@"error"]];
             if(failure) failure(_operation,[self errorWithDescription:error]);
@@ -186,7 +176,12 @@ NSString * const kAFRSynccitAPIBaseURLString = @"http://api.synccit.com/api.php"
             return;
         }
         
-        if(success) success(_operation,[self linkIdsArrayDictionary:json]);
+        
+        if(success) {
+            NSArray *linkIds = [self linkIdsArrayDictionary:json];
+            success(_operation,linkIds);
+            DLog(@"synccit API update success %@", [linkIds componentsJoinedByString:@","]);
+        }
     };
     
     void (^failureWrapper)(AFHTTPRequestOperation *_operation, NSError *_error) = ^(AFHTTPRequestOperation *_operation, NSError *_error)
@@ -204,6 +199,10 @@ NSString * const kAFRSynccitAPIBaseURLString = @"http://api.synccit.com/api.php"
                            visited:(void (^)(NSArray *visitedLinkData))visited;
 
 {
+    if (self.username == nil || self.authCode == nil) {
+        DLog(@"Not logged in, ignoring");
+    }
+    
     NSArray *children = [redditAPIResponse valueForKeyPath:@"data.children"];
     NSMutableArray *childrenIds = [NSMutableArray arrayWithCapacity:children.count];
     for (NSDictionary* data in children) {

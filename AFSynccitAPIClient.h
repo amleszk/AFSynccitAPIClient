@@ -8,7 +8,7 @@
 
 
 + (AFSynccitAPIClient *)sharedClient;
-
+-(BOOL) isEnabled;
 -(void) addLinkId:(NSString*)linkId;
 -(void) setUsername:(NSString*)username authCode:(NSString*)authCode;
 
@@ -18,6 +18,5 @@
 
 -(void) statusForRedditAPIResponse:(NSDictionary*)redditAPIResponse
                            visited:(void (^)(NSArray *visitedLinkData))visited;
-
 
 @end
