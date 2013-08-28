@@ -2,7 +2,7 @@
 #import "AFSynccitAPIClient.h"
 #import "AFJSONRequestOperation.h"
 
-NSString * const kAFRSynccitAPIBaseURLString = @"http://api.synccit.com/api.php";
+NSString * const kAFRSynccitAPIBaseURLString = @"http://api.synccit.com/";
 
 @interface AFSynccitAPIClient ()
 @property NSTimer *updateTimer;
@@ -68,6 +68,12 @@ NSString * const kAFRSynccitAPIBaseURLString = @"http://api.synccit.com/api.php"
 
 -(void) updateTimerFireMethod:(NSTimer*)timer
 {
+#if TARGET_IPHONE_SIMULATOR
+    DLog(@"Ignoring Synccit sync");
+#else
+    DLog(@"Synccit update fired");
+#endif
+    
     [self uploadLinks];
     [self downloadLinks];
 }
@@ -125,7 +131,7 @@ NSString * const kAFRSynccitAPIBaseURLString = @"http://api.synccit.com/api.php"
     };
     
     
-	NSURLRequest *request = [self requestWithMethod:@"POST" path:@"" parameters:parameters];
+	NSURLRequest *request = [self requestWithMethod:@"POST" path:@"api.php" parameters:parameters];
 	self.uploadOperation = [self HTTPRequestOperationWithRequest:request success:success failure:failure];
     [self enqueueHTTPRequestOperation:self.uploadOperation];
 }
@@ -273,13 +279,13 @@ static NSInteger kMaxSynccitHistorySize = 100;
         }
     };
     
-    void (^failureWrapper)(AFHTTPRequestOperation *_operation, NSError *_error) = ^(AFHTTPRequestOperation *_operation, NSError *_error)
+    void (^failureWrapper)(AFHTTPRequestOperation *, NSError *) = ^(AFHTTPRequestOperation *_operation, NSError *_error)
     {
         if(failure) failure(_operation,_error);
         DLog(@"synccit API update failed %@", error);
     };
     
-	NSURLRequest *request = [self requestWithMethod:@"POST" path:@"" parameters:parameters];
+	NSURLRequest *request = [self requestWithMethod:@"POST" path:@"api.php" parameters:parameters];
 	AFHTTPRequestOperation *operation = [self HTTPRequestOperationWithRequest:request success:successWrapper failure:failureWrapper];
     [self enqueueHTTPRequestOperation:operation];
 }
@@ -346,13 +352,13 @@ static NSInteger kMaxSynccitHistorySize = 100;
         }
     };
     
-    void (^failureWrapper)(AFHTTPRequestOperation *_operation, NSError *_error) = ^(AFHTTPRequestOperation *_operation, NSError *_error)
+    void (^failureWrapper)(AFHTTPRequestOperation *, NSError *) = ^(AFHTTPRequestOperation *_operation, NSError *_error)
     {
         if(failure) failure(_operation,_error);
         DLog(@"synccit API update failed %@", error);
     };
     
-	NSURLRequest *request = [self requestWithMethod:@"POST" path:@"" parameters:parameters];
+	NSURLRequest *request = [self requestWithMethod:@"POST" path:@"api.php" parameters:parameters];
 	AFHTTPRequestOperation *operation = [self HTTPRequestOperationWithRequest:request success:successWrapper failure:failureWrapper];
     [self enqueueHTTPRequestOperation:operation];
     return operation;
