@@ -1,6 +1,7 @@
 AFSynccitAPIClient
 =======
-Cocoa client for syncing read reddit links
+Cocoa client for syncing read reddit links to http://synccit.com/. This client maintains an `NSTimer` that repeatedly fires uploading accumulated links to synccit
+
 
 Dependencies: 
 - iOS5
